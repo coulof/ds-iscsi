@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: start-iscsid
+  namespace: kube-system
+  annotations:
+    kubernetes.io/description: 'DaemonSet that starts iscsid on every nodes.'
+spec:
+  selector:
+    matchLabels:
+      name: start-iscsid
+  template:
+    metadata:
+      labels:
+        name: start-iscsid
+    spec:
+      hostNetwork: true
+      hostPID: true
+      volumes:
+      - hostPath:
+          path: /
+        name: host
+      initContainers:
+      - name: iscid-start
+        image: ubuntu
+        command: ["chroot", "/host", "systemctl", "start", "iscsid"]
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host
+          mountPath: /host
+        resources:
+          requests:
+            memory: "10Mi"
+            cpu: "10m"
+      containers:
+      - name: pause
+        image: gcr.io/google_containers/pause
+        imagePullPolicy: IfNotPresent
