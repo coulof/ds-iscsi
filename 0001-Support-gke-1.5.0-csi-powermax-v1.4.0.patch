@@ -1,0 +1,127 @@
+From f9bad911d81a405a113f934352bfbc811449cd76 Mon Sep 17 00:00:00 2001
+From: coulof <florian.coulombel@dell.com>
+Date: Tue, 20 Oct 2020 09:08:31 +0000
+Subject: [PATCH 1/1] Disable snapshots and enforce iscsid start
+
+---
+ helm/csi-powermax/templates/controller.yaml   | 32 ---------------
+ helm/csi-powermax/templates/ds-iscsi.yaml     | 39 +++++++++++++++++++
+ .../templates/volumesnapshotclass.yaml        | 10 -----
+ 3 files changed, 39 insertions(+), 42 deletions(-)
+ create mode 100644 helm/csi-powermax/templates/ds-iscsi.yaml
+ delete mode 100644 helm/csi-powermax/templates/volumesnapshotclass.yaml
+
+diff --git a/helm/csi-powermax/templates/controller.yaml b/helm/csi-powermax/templates/controller.yaml
+index ac537eb..f0330ed 100644
+--- a/helm/csi-powermax/templates/controller.yaml
++++ b/helm/csi-powermax/templates/controller.yaml
+@@ -41,24 +41,6 @@ rules:
+     resources: ["csinodeinfos"]
+     verbs: ["get", "list", "watch"]
+ # below for snapshotter
+-  - apiGroups: [""]
+-    resources: ["secrets"]
+-    verbs: ["get", "list"]
+-  - apiGroups: ["snapshot.storage.k8s.io"]
+-    resources: ["volumesnapshotcontents"]
+-    verbs: ["get", "list", "watch", "update", "create", "delete"]
+-  - apiGroups: ["snapshot.storage.k8s.io"]
+-    resources: ["volumesnapshotcontents/status"]
+-    verbs: ["update"]
+-  - apiGroups: ["snapshot.storage.k8s.io"]
+-    resources: ["volumesnapshotclasses"]
+-    verbs: ["get", "list", "watch"]
+-  - apiGroups: ["snapshot.storage.k8s.io"]
+-    resources: ["volumesnapshots", "volumesnapshots/status"]
+-    verbs: ["get", "list", "watch", "update"]
+-  - apiGroups: ["apiextensions.k8s.io"]
+-    resources: ["customresourcedefinitions"]
+-    verbs: ["create", "list", "watch", "delete"]
+ ---
+ kind: ClusterRoleBinding
+ apiVersion: rbac.authorization.k8s.io/v1
+@@ -144,20 +126,6 @@ spec:
+           volumeMounts:
+             - name: socket-dir
+               mountPath: /var/run/csi
+-        - name: snapshotter
+-          image: {{ required "Must provide the CSI snapshotter container image." .Values.images.snapshotter }}
+-          args:
+-            - "--csi-address=$(ADDRESS)"
+-            - "--v=5"
+-            - "--snapshot-name-prefix={{ required "Must privided a Snapshot Name Prefix" .Values.snapNamePrefix }}"
+-            - "--snapshot-name-uuid-length=10"
+-            - "--timeout=600s"
+-          env:
+-            - name: ADDRESS
+-              value: /var/run/csi/csi.sock
+-          volumeMounts:
+-            - name: socket-dir
+-              mountPath: /var/run/csi
+         - name: resizer
+           image: {{ required "Must provide the CSI resizer container image." .Values.images.resizer }}
+           args:
+diff --git a/helm/csi-powermax/templates/ds-iscsi.yaml b/helm/csi-powermax/templates/ds-iscsi.yaml
+new file mode 100644
+index 0000000..f0cb61d
+--- /dev/null
++++ b/helm/csi-powermax/templates/ds-iscsi.yaml
+@@ -0,0 +1,39 @@
++apiVersion: apps/v1
++kind: DaemonSet
++metadata:
++  name: start-iscsid
++  namespace: kube-system
++  annotations:
++    kubernetes.io/description: 'DaemonSet that starts iscsid on every nodes.'
++spec:
++  selector:
++    matchLabels:
++      name: start-iscsid
++  template:
++    metadata:
++      labels:
++        name: start-iscsid
++    spec:
++      hostNetwork: true
++      hostPID: true
++      volumes:
++      - hostPath:
++          path: /
++        name: host
++      initContainers:
++      - name: iscid-start
++        image: ubuntu
++        command: ["chroot", "/host", "systemctl", "start", "iscsid"]
++        securityContext:
++          privileged: true
++        volumeMounts:
++        - name: host
++          mountPath: /host
++        resources:
++          requests:
++            memory: "10Mi"
++            cpu: "10m"
++      containers:
++      - name: pause
++        image: gcr.io/google_containers/pause
++        imagePullPolicy: IfNotPresent
+diff --git a/helm/csi-powermax/templates/volumesnapshotclass.yaml b/helm/csi-powermax/templates/volumesnapshotclass.yaml
+deleted file mode 100644
+index 690abce..0000000
+--- a/helm/csi-powermax/templates/volumesnapshotclass.yaml
++++ /dev/null
+@@ -1,10 +0,0 @@
+-apiVersion: snapshot.storage.k8s.io/v1beta1
+-deletionPolicy: Delete
+-kind: VolumeSnapshotClass
+-metadata:
+-  name: {{ required "Must provide a storage class name." .Values.snapshotClass.name}}
+-{{- if eq .Values.customDriverName.enabled true}}
+-driver: {{ printf "%s.%s.dellemc.com" .Release.Namespace .Values.customDriverName.value }}
+-{{- else }}
+-driver: csi-powermax.dellemc.com
+-{{- end }}
+-- 
+2.17.1
+
