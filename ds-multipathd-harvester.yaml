@@ -1,0 +1,107 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multipath-config
+data:
+  multipath.conf: |
+    blacklist {
+        device {
+            vendor "!EMC"
+            product "!LUN"
+        }
+    }
+    blacklist_exceptions {
+        device {
+            vendor "EMC"
+            product "LUN"
+        }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oem-multipathd
+data:
+  99_multipathd.yaml: |
+    stages:
+      default:
+      - name: "Setup multipathd"
+          systemctl:
+            enable:
+            - multipathd
+            start:
+            - multipathd
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: start-multipathd
+  annotations:
+    kubernetes.io/description: 'DaemonSet that configures and starts multipathd on every nodes.'
+spec:
+  selector:
+    matchLabels:
+      name: start-multipathd
+  template:
+    metadata:
+      labels:
+        name: start-multipathd
+    spec:
+      hostNetwork: true
+      hostPID: true
+      volumes:
+      - hostPath:
+          path: /
+        name: host
+      - configMap:
+          name: oem-multipathd
+        name: oem-multipathd
+      - configMap:
+          name: multipath-config
+        name: multipath-config
+      initContainers:
+      - name: oem-multipathd
+        image: registry.suse.com/bci/bci-micro:15.6
+        command: ["cp", "/multipath.conf", "/host/etc/"]
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host
+          mountPath: /host
+        - name: multipath-config
+          mountPath: /
+        resources:
+          requests:
+            memory: "10Mi"
+            cpu: "10m"
+      - name: multipathd-configuration
+        image: registry.suse.com/bci/bci-micro:15.6
+        command: ["cp", "/99_multipathd.yaml", "/host/oem/"]
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host
+          mountPath: /host
+        - name: oem-multipathd
+          mountPath: /
+        resources:
+          requests:
+            memory: "10Mi"
+            cpu: "10m"
+      - name: multipathd-start
+        image: registry.suse.com/bci/bci-micro:15.6
+        command: ["chroot", "/host", "systemctl", "start", "multipathd"]
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host
+          mountPath: /host
+        resources:
+          requests:
+            memory: "10Mi"
+            cpu: "10m"
+      containers:
+      - name: pause
+        image: gcr.io/google_containers/pause
+        imagePullPolicy: IfNotPresent
