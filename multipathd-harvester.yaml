@@ -26,8 +26,8 @@ spec:
             }
           permissions: 0744
       - name: "Start multipathd service"
-          systemctl:
-            enable:
-            - multipathd
-            start:
-            - multipathd
+        systemctl:
+          enable:
+          - multipathd
+          start:
+          - multipathd
